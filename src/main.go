@@ -22,7 +22,8 @@ var (
 			return ctx.SendStatus(http.StatusInternalServerError)
 		},
 	})
-	conf *Config = DefaultConfig
+	conf *Config  = DefaultConfig
+	m    *MongoDB = &MongoDB{}
 )
 
 func init() {
@@ -38,15 +39,20 @@ func init() {
 		}
 	}
 
+	if err := m.Connect(conf.MongoDB); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Successfully connected to MongoDB")
+
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
 	}))
 
 	if conf.Environment == "development" {
 		app.Use(cors.New(cors.Config{
-			AllowOrigins:  "*",
-			AllowMethods:  "HEAD,OPTIONS,GET",
-			ExposeHeaders: "X-Cache-Hit,X-Cache-Time-Remaining",
+			AllowOrigins: "*",
+			AllowMethods: "HEAD,OPTIONS,GET,POST",
 		}))
 
 		app.Use(logger.New(logger.Config{
@@ -58,6 +64,8 @@ func init() {
 }
 
 func main() {
+	defer m.Close()
+
 	instanceID, err := GetInstanceID()
 
 	if err != nil {
