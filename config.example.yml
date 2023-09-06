@@ -1,0 +1,4 @@
+environment: development
+host: 0.0.0.0
+port: 3002
+mongodb: mongodb://127.0.0.1:27017/mcstatus

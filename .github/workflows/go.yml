@@ -1,0 +1,25 @@
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+        check-latest: true
+      
+    - name: Lint
+      run: go vet ./src/...
+      
+    - name: Build
+      run: make build
