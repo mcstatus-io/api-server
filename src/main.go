@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -25,24 +26,34 @@ var (
 			return ctx.SendStatus(http.StatusInternalServerError)
 		},
 	})
-	config     *Config = DefaultConfig
-	instanceID uint16  = 0
+	db         *MongoDB            = &MongoDB{}
+	config     *Config             = DefaultConfig
+	instanceID uint16              = 0
+	validate   *validator.Validate = validator.New()
 )
 
 func init() {
 	var err error
 
 	if err = config.ReadFile("config.yml"); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			log.Printf("config.yml does not exist, writing default config\n")
+		if !errors.Is(err, os.ErrNotExist) {
+			panic(err)
+		}
 
-			if err = config.WriteFile("config.yml"); err != nil {
-				log.Fatalf("Failed to write config file: %v", err)
-			}
-		} else {
-			log.Printf("Failed to read config file: %v", err)
+		if err = config.WriteFile("config.yml"); err != nil {
+			log.Fatalf("Failed to write config file: %v", err)
 		}
 	}
+
+	if instanceID, err = GetInstanceID(); err != nil {
+		panic(err)
+	}
+
+	if err := db.Connect(config.MongoDB); err != nil {
+		panic(err)
+	}
+
+	log.Println("Successfully connected to MongoDB")
 
 	app.Hooks().OnListen(func(ld fiber.ListenData) error {
 		log.Printf("Listening on %s:%d\n", config.Host, config.Port+instanceID)
@@ -52,6 +63,8 @@ func init() {
 }
 
 func main() {
+	defer db.Close()
+
 	if err := app.Listen(fmt.Sprintf("%s:%d", config.Host, config.Port+instanceID)); err != nil {
 		panic(err)
 	}
