@@ -24,9 +24,9 @@ type MongoDB struct {
 
 type User struct {
 	ID        string    `bson:"_id" json:"id"`
-	FirstName string    `bson:"firstName" json:"firstName"`
 	Email     string    `bson:"email" json:"email"`
 	Password  string    `bson:"password" json:"-"`
+	Type      string    `bson:"type" json:"type"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 }
 

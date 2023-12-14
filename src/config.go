@@ -24,6 +24,16 @@ type Config struct {
 	Host        string `yaml:"host"`
 	Port        uint16 `yaml:"port"`
 	MongoDB     string `yaml:"mongodb"`
+	Discord     struct {
+		ClientID    string `yaml:"client_id"`
+		Secret      string `yaml:"secret"`
+		RedirectURI string `yaml:"redirect_uri"`
+	} `yaml:"discord"`
+	GitHub struct {
+		ClientID    string `yaml:"client_id"`
+		Secret      string `yaml:"secret"`
+		RedirectURI string `yaml:"redirect_uri"`
+	} `yaml:"github"`
 }
 
 // ReadFile reads the configuration from the given file and overrides values using environment variables.

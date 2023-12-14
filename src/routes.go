@@ -17,7 +17,6 @@ type PostLoginRequestBody struct {
 }
 
 type PostSignupRequestBody struct {
-	FirstName       string `json:"firstName" validate:"min=1,max=36,required"`
 	Email           string `json:"email" validate:"email,required"`
 	Password        string `json:"password" validate:"min=6,required"`
 	ConfirmPassword string `json:"confirmPassword" validate:"eqfield=Password,required"`
@@ -48,6 +47,8 @@ func init() {
 	app.Get("/ping", PingHandler)
 	app.Post("/auth/login", PostLoginHandler)
 	app.Post("/auth/signup", PostSignupHandler)
+	app.Post("/auth/discord", PostDiscordCallbackHandler)
+	app.Post("/auth/github", PostGitHubCallbackHandler)
 	app.Get("/users/:id", GetUserHandler)
 }
 
@@ -72,6 +73,10 @@ func PostLoginHandler(ctx *fiber.Ctx) error {
 
 	if user == nil {
 		return ctx.Status(http.StatusForbidden).SendString("No user exists with that email address")
+	}
+
+	if user.Type != "local" {
+		return ctx.Status(http.StatusForbidden).SendString("A user exists with that email but is not using local login. Please login with the other service provider instead.")
 	}
 
 	if HashPassword(requestBody.Password) != user.Password {
@@ -115,7 +120,6 @@ func PostSignupHandler(ctx *fiber.Ctx) error {
 
 	userDocument := User{
 		ID:        RandomHexString(8),
-		FirstName: requestBody.FirstName,
 		Email:     requestBody.Email,
 		Password:  HashPassword(requestBody.Password),
 		CreatedAt: time.Now(),
@@ -136,6 +140,146 @@ func PostSignupHandler(ctx *fiber.Ctx) error {
 	}
 
 	return ctx.Status(http.StatusCreated).JSON(sessionDocument)
+}
+
+// PostDiscordCallbackHandler authenticates the user using the Discord OAuth code.
+func PostDiscordCallbackHandler(ctx *fiber.Ctx) error {
+	code := ctx.Query("code")
+
+	if len(code) < 1 {
+		return ctx.Status(http.StatusBadRequest).SendString("Missing code query parameter")
+	}
+
+	tokenResponse, err := ExchangeDiscordAccessToken(code)
+
+	if err != nil {
+		return err
+	}
+
+	discordUser, err := GetDiscordUser(tokenResponse.AccessToken)
+
+	if err != nil {
+		return err
+	}
+
+	user, err := db.GetUserByEmail(discordUser.Email)
+
+	if err != nil {
+		return err
+	}
+
+	var userID string
+
+	if user == nil {
+		userDocument := User{
+			ID:        RandomHexString(8),
+			Email:     discordUser.Email,
+			Password:  tokenResponse.AccessToken,
+			Type:      "discord",
+			CreatedAt: time.Now().UTC(),
+		}
+
+		if err := db.InsertUser(userDocument); err != nil {
+			return err
+		}
+
+		userID = userDocument.ID
+	} else {
+		if user.Type != "discord" {
+			return ctx.Status(http.StatusForbidden).SendString("A user exists with that email but is not using Discord for login. Please login with the other service provider or local login instead.")
+		}
+
+		userID = user.ID
+	}
+
+	sessionDocument := Session{
+		ID:        RandomHexString(16),
+		User:      userID,
+		CreatedAt: time.Now(),
+	}
+
+	if err := db.InsertSession(sessionDocument); err != nil {
+		return err
+	}
+
+	return ctx.JSON(sessionDocument)
+}
+
+// PostGitHubCallbackHandler authenticates the user using the GitHub OAuth code.
+func PostGitHubCallbackHandler(ctx *fiber.Ctx) error {
+	code := ctx.Query("code")
+
+	if len(code) < 1 {
+		return ctx.Status(http.StatusBadRequest).SendString("Missing code query parameter")
+	}
+
+	tokenResponse, err := ExchangeGitHubAccessToken(code)
+
+	if err != nil {
+		return err
+	}
+
+	githubEmails, err := GetGitHubEmails(tokenResponse.AccessToken)
+
+	if err != nil {
+		return err
+	}
+
+	var primaryEmail string
+
+	for _, emails := range githubEmails {
+		if !emails.Primary {
+			continue
+		}
+
+		primaryEmail = emails.Email
+	}
+
+	if len(primaryEmail) < 1 {
+		return ctx.Status(http.StatusConflict).SendString("Cannot find a primary email address associated with that GitHub user")
+	}
+
+	user, err := db.GetUserByEmail(primaryEmail)
+
+	if err != nil {
+		return err
+	}
+
+	var userID string
+
+	if user == nil {
+		userDocument := User{
+			ID:        RandomHexString(8),
+			Email:     primaryEmail,
+			Password:  tokenResponse.AccessToken,
+			Type:      "github",
+			CreatedAt: time.Now().UTC(),
+		}
+
+		if err := db.InsertUser(userDocument); err != nil {
+			return err
+		}
+
+		userID = userDocument.ID
+	} else {
+		if user.Type != "github" {
+			return ctx.Status(http.StatusForbidden).SendString("A user exists with that email but is not using Discord for login. Please login with the other service provider or local login instead.")
+		}
+
+		userID = user.ID
+	}
+
+	sessionDocument := Session{
+		ID:        RandomHexString(16),
+		User:      userID,
+		CreatedAt: time.Now(),
+	}
+
+	if err := db.InsertSession(sessionDocument); err != nil {
+		return err
+	}
+
+	return ctx.JSON(sessionDocument)
 }
 
 // GetUserHandler returns the user by the ID or the current authenticated user.
