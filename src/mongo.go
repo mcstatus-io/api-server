@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	CollectionUsers    string = "users"
-	CollectionSessions string = "sessions"
+	CollectionUsers        string = "users"
+	CollectionSessions     string = "sessions"
+	CollectionApplications string = "applications"
 )
 
 type MongoDB struct {
@@ -34,6 +35,16 @@ type Session struct {
 	ID        string    `bson:"_id" json:"id"`
 	User      string    `bson:"user" json:"user"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+}
+
+type Application struct {
+	ID               string    `bson:"_id" json:"id"`
+	Name             string    `bson:"name" json:"name"`
+	ShortDescription string    `bson:"shortDescription" json:"shortDescription"`
+	User             string    `bson:"user" json:"user"`
+	Token            string    `bson:"token" json:"token"`
+	TotalRequests    uint64    `bson:"totalRequests" json:"totalRequests"`
+	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
 }
 
 func (c *MongoDB) Connect(uri string) error {
@@ -75,6 +86,16 @@ func (c *MongoDB) InsertSession(document Session) error {
 	defer cancel()
 
 	_, err := c.Database.Collection(CollectionSessions).InsertOne(ctx, document)
+
+	return err
+}
+
+func (c *MongoDB) InsertApplication(document Application) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	_, err := c.Database.Collection(CollectionApplications).InsertOne(ctx, document)
 
 	return err
 }
@@ -152,6 +173,31 @@ func (c *MongoDB) GetSessionByID(id string) (*Session, error) {
 	}
 
 	return &result, nil
+}
+
+func (c *MongoDB) GetApplicationsByUser(user string) ([]*Application, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	cur, err := c.Database.Collection(CollectionApplications).Find(ctx, bson.M{"user": user})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cur.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]*Application, 0)
+
+	if err := cur.All(ctx, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (c *MongoDB) Close() error {

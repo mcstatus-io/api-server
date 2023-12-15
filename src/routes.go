@@ -22,6 +22,11 @@ type PostSignupRequestBody struct {
 	ConfirmPassword string `json:"confirmPassword" validate:"eqfield=Password,required"`
 }
 
+type PostApplicationsRequestBody struct {
+	Name             string `json:"name" validate:"min=2,max=64,required"`
+	ShortDescription string `json:"shortDescription" validate:"min=30,max=480,required"`
+}
+
 func init() {
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
@@ -49,7 +54,9 @@ func init() {
 	app.Post("/auth/signup", PostSignupHandler)
 	app.Post("/auth/discord", PostDiscordCallbackHandler)
 	app.Post("/auth/github", PostGitHubCallbackHandler)
-	app.Get("/users/:id", GetUserHandler)
+	app.Get("/users/:id", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserHandler)
+	app.Get("/users/:id/applications", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserApplicationsHandler)
+	app.Post("/applications", AuthenticateMiddleware(), RequireAuthMiddleware(), PostApplicationsHandler)
 }
 
 // PingHandler responds with a 200 OK status for simple health checks.
@@ -284,37 +291,45 @@ func PostGitHubCallbackHandler(ctx *fiber.Ctx) error {
 
 // GetUserHandler returns the user by the ID or the current authenticated user.
 func GetUserHandler(ctx *fiber.Ctx) error {
-	userID := ctx.Params("id")
+	return ctx.JSON(ctx.Locals("user"))
+}
 
-	if userID == "@me" {
-		sessionToken := ctx.Get("Authorization")
+// GetUserHandler returns the user by the ID or the current authenticated user.
+func GetUserApplicationsHandler(ctx *fiber.Ctx) error {
+	user := ctx.Locals("user").(*User)
 
-		if len(sessionToken) < 1 {
-			return ctx.Status(http.StatusUnauthorized).SendString("Missing Authorization header")
-		}
-
-		session, err := db.GetSessionByID(sessionToken)
-
-		if err != nil {
-			return err
-		}
-
-		if session == nil {
-			return ctx.Status(http.StatusForbidden).SendString("Invalid or expired session")
-		}
-
-		userID = session.User
-	}
-
-	user, err := db.GetUserByID(userID)
+	applications, err := db.GetApplicationsByUser(user.ID)
 
 	if err != nil {
 		return err
 	}
 
-	if user == nil {
-		return ctx.Status(http.StatusNotFound).SendString("User not found by that ID")
+	return ctx.JSON(applications)
+}
+
+// PostApplicationsHandler creates a new application using the body data provided.
+func PostApplicationsHandler(ctx *fiber.Ctx) error {
+	authUser := ctx.Locals("authUser").(*User)
+
+	var requestBody PostApplicationsRequestBody
+
+	if err := ctx.BodyParser(&requestBody); err != nil {
+		return ctx.Status(http.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: %s", err))
 	}
 
-	return ctx.JSON(user)
+	applicationDocument := Application{
+		ID:               RandomHexString(12),
+		Name:             requestBody.Name,
+		ShortDescription: requestBody.ShortDescription,
+		User:             authUser.ID,
+		Token:            RandomHexString(16),
+		TotalRequests:    0,
+		CreatedAt:        time.Now().UTC(),
+	}
+
+	if err := db.InsertApplication(applicationDocument); err != nil {
+		return err
+	}
+
+	return ctx.Status(http.StatusCreated).JSON(applicationDocument)
 }
