@@ -57,6 +57,7 @@ func init() {
 	app.Get("/users/:id", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserHandler)
 	app.Get("/users/:id/applications", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserApplicationsHandler)
 	app.Post("/applications", AuthenticateMiddleware(), RequireAuthMiddleware(), PostApplicationsHandler)
+	app.Get("/applications/:id", GetApplicationHandler)
 }
 
 // PingHandler responds with a 200 OK status for simple health checks.
@@ -332,4 +333,19 @@ func PostApplicationsHandler(ctx *fiber.Ctx) error {
 	}
 
 	return ctx.Status(http.StatusCreated).JSON(applicationDocument)
+}
+
+// GetApplicationHandler returns the specific application by ID.
+func GetApplicationHandler(ctx *fiber.Ctx) error {
+	application, err := db.GetApplicationByID(ctx.Params("id"))
+
+	if err != nil {
+		return err
+	}
+
+	if application == nil {
+		return ctx.Status(http.StatusNotFound).SendString("No application found by that ID")
+	}
+
+	return ctx.JSON(application)
 }

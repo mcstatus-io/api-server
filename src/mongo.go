@@ -175,8 +175,32 @@ func (c *MongoDB) GetSessionByID(id string) (*Session, error) {
 	return &result, nil
 }
 
-func (c *MongoDB) GetApplicationsByUser(user string) ([]*Application, error) {
+func (c *MongoDB) GetApplicationByID(id string) (*Application, error) {
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	cur := c.Database.Collection(CollectionApplications).FindOne(ctx, bson.M{"_id": id})
+
+	if err := cur.Err(); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	var result Application
+
+	if err := cur.Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c *MongoDB) GetApplicationsByUser(user string) ([]*Application, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 
 	defer cancel()
