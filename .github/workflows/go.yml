@@ -18,6 +18,9 @@ jobs:
         go-version: '1.21'
         check-latest: true
       
+    - name: Download Dependencies
+      run: go get ./src
+      
     - name: Lint
       run: go vet ./src
       
