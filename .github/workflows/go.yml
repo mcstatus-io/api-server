@@ -19,7 +19,10 @@ jobs:
         check-latest: true
       
     - name: Lint
-      run: go vet ./src/...
+      run: go vet ./src
+      
+    - name: Test
+      run: go test -v ./src
       
     - name: Build
-      run: make build
+      run: make
