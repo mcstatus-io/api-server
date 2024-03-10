@@ -16,6 +16,7 @@ var (
 	CollectionUsers        string = "users"
 	CollectionSessions     string = "sessions"
 	CollectionApplications string = "applications"
+	CollectionTokens       string = "tokens"
 )
 
 type MongoDB struct {
@@ -45,6 +46,16 @@ type Application struct {
 	Token            string    `bson:"token" json:"token"`
 	TotalRequests    uint64    `bson:"totalRequests" json:"totalRequests"`
 	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
+}
+
+type Token struct {
+	ID            string    `bson:"_id" json:"id"`
+	Name          string    `bson:"name" json:"name"`
+	Token         string    `bson:"token" json:"token"`
+	TotalRequests uint64    `bson:"totalRequests" json:"totalRequests"`
+	Application   string    `bson:"application" json:"application"`
+	CreatedAt     time.Time `bson:"createdAt" json:"createdAt"`
+	LastUsedAt    time.Time `bson:"lastUsedAt" json:"lastUsedAt"`
 }
 
 func (c *MongoDB) Connect(uri string) error {
@@ -96,6 +107,16 @@ func (c *MongoDB) InsertApplication(document Application) error {
 	defer cancel()
 
 	_, err := c.Database.Collection(CollectionApplications).InsertOne(ctx, document)
+
+	return err
+}
+
+func (c *MongoDB) InsertToken(document Token) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	_, err := c.Database.Collection(CollectionTokens).InsertOne(ctx, document)
 
 	return err
 }
@@ -175,6 +196,31 @@ func (c *MongoDB) GetSessionByID(id string) (*Session, error) {
 	return &result, nil
 }
 
+func (c *MongoDB) GetTokenByID(id string) (*Token, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	cur := c.Database.Collection(CollectionTokens).FindOne(ctx, bson.M{"_id": id})
+
+	if err := cur.Err(); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	var result Token
+
+	if err := cur.Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 func (c *MongoDB) GetApplicationByID(id string) (*Application, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
@@ -200,12 +246,34 @@ func (c *MongoDB) GetApplicationByID(id string) (*Application, error) {
 	return &result, nil
 }
 
-func (c *MongoDB) GetApplicationsByUser(user string) ([]*Application, error) {
+func (c *MongoDB) GetApplicationsByUser(user string, sort, direction string) ([]*Application, error) {
+	var sortQuery bson.M
+
+	switch sort {
+	default:
+		fallthrough
+	case "name":
+		{
+			sortQuery = bson.M{"name": GetSortDirectionValue(direction)}
+
+			break
+		}
+	case "createdAt":
+		{
+			sortQuery = bson.M{"createdAt": GetSortDirectionValue(direction)}
+
+			break
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 
 	defer cancel()
 
-	cur, err := c.Database.Collection(CollectionApplications).Find(ctx, bson.M{"user": user})
+	cur, err := c.Database.Collection(CollectionApplications).Aggregate(ctx, []bson.M{
+		{"$match": bson.M{"user": user}},
+		{"$sort": sortQuery},
+	})
 
 	if err != nil {
 		return nil, err
@@ -222,6 +290,97 @@ func (c *MongoDB) GetApplicationsByUser(user string) ([]*Application, error) {
 	}
 
 	return result, nil
+}
+
+func (c *MongoDB) GetTokensByApplication(application, sort, direction string) ([]*Token, error) {
+	var sortQuery bson.M
+
+	switch sort {
+	default:
+		fallthrough
+	case "name":
+		{
+			sortQuery = bson.M{"name": GetSortDirectionValue(direction)}
+
+			break
+		}
+	case "createdAt":
+		{
+			sortQuery = bson.M{"createdAt": GetSortDirectionValue(direction)}
+
+			break
+		}
+	case "lastUsedAt":
+		{
+			sortQuery = bson.M{"lastUsedAt": GetSortDirectionValue(direction)}
+
+			break
+		}
+	case "totalRequests":
+		{
+			sortQuery = bson.M{"totalRequests": GetSortDirectionValue(direction)}
+
+			break
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	cur, err := c.Database.Collection(CollectionTokens).Aggregate(ctx, []bson.M{
+		{"$match": bson.M{"application": application}},
+		{"$sort": sortQuery},
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cur.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]*Token, 0)
+
+	if err := cur.All(ctx, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *MongoDB) UpdateApplicationByID(id string, update bson.M) error {
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	_, err := c.Database.Collection(CollectionApplications).UpdateOne(ctx, bson.M{"_id": id}, update)
+
+	return err
+}
+
+func (c *MongoDB) DeleteTokenByID(id string) error {
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	_, err := c.Database.Collection(CollectionTokens).DeleteOne(ctx, bson.M{"_id": id})
+
+	return err
+}
+
+func (c *MongoDB) DeleteApplicationByID(id string) error {
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
+	defer cancel()
+
+	_, err := c.Database.Collection(CollectionApplications).DeleteOne(ctx, bson.M{"_id": id})
+
+	return err
 }
 
 func (c *MongoDB) Close() error {

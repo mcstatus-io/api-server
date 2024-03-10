@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type PostLoginRequestBody struct {
@@ -27,14 +28,19 @@ type PostApplicationsRequestBody struct {
 	ShortDescription string `json:"shortDescription" validate:"min=30,max=480,required"`
 }
 
+type PostApplicationRequestBody struct {
+	Name             string `json:"name" validate:"min=2,max=64,required"`
+	ShortDescription string `json:"shortDescription" validate:"min=30,max=480,required"`
+}
+
+type PostApplicationTokensRequestBody struct {
+	Name string `json:"name" validate:"min=2,max=64,required"`
+}
+
 func init() {
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
 	}))
-
-	/* app.Use(favicon.New(favicon.Config{
-		Data: assets.Favicon,
-	})) */
 
 	if config.Environment == "development" {
 		app.Use(cors.New(cors.Config{
@@ -54,10 +60,15 @@ func init() {
 	app.Post("/auth/signup", PostSignupHandler)
 	app.Post("/auth/discord", PostDiscordCallbackHandler)
 	app.Post("/auth/github", PostGitHubCallbackHandler)
-	app.Get("/users/:id", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserHandler)
-	app.Get("/users/:id/applications", AuthenticateMiddleware(), GetUserMiddleware("id"), UserAuthMiddleware(), GetUserApplicationsHandler)
+	app.Get("/users/:userID", AuthenticateMiddleware(), GetUserMiddleware("userID"), UserAuthMiddleware(), GetUserHandler)
+	app.Get("/users/:userID/applications", AuthenticateMiddleware(), GetUserMiddleware("userID"), UserAuthMiddleware(), GetUserApplicationsHandler)
 	app.Post("/applications", AuthenticateMiddleware(), RequireAuthMiddleware(), PostApplicationsHandler)
-	app.Get("/applications/:id", GetApplicationHandler)
+	app.Get("/applications/:applicationID", GetApplicationMiddleware("applicationID"), GetApplicationHandler)
+	app.Post("/applications/:applicationID", GetApplicationMiddleware("applicationID"), PostApplicationHandler)
+	app.Delete("/applications/:applicationID", GetApplicationMiddleware("applicationID"), DeleteApplicationHandler)
+	app.Get("/applications/:applicationID/tokens", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), GetApplicationTokensHandler)
+	app.Post("/applications/:applicationID/tokens", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), PostApplicationTokensHandler)
+	app.Delete("/applications/:applicationID/tokens/:tokenID", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), DeleteApplicationTokenHandler)
 }
 
 // PingHandler responds with a 200 OK status for simple health checks.
@@ -130,6 +141,7 @@ func PostSignupHandler(ctx *fiber.Ctx) error {
 		ID:        RandomHexString(8),
 		Email:     requestBody.Email,
 		Password:  HashPassword(requestBody.Password),
+		Type:      "local",
 		CreatedAt: time.Now(),
 	}
 
@@ -297,9 +309,12 @@ func GetUserHandler(ctx *fiber.Ctx) error {
 
 // GetUserHandler returns the user by the ID or the current authenticated user.
 func GetUserApplicationsHandler(ctx *fiber.Ctx) error {
+	sortBy := ctx.Query("sort", "name")
+	sortDirection := ctx.Query("direction", "ascending")
+
 	user := ctx.Locals("user").(*User)
 
-	applications, err := db.GetApplicationsByUser(user.ID)
+	applications, err := db.GetApplicationsByUser(user.ID, sortBy, sortDirection)
 
 	if err != nil {
 		return err
@@ -337,15 +352,100 @@ func PostApplicationsHandler(ctx *fiber.Ctx) error {
 
 // GetApplicationHandler returns the specific application by ID.
 func GetApplicationHandler(ctx *fiber.Ctx) error {
-	application, err := db.GetApplicationByID(ctx.Params("id"))
+	return ctx.JSON(ctx.Locals("application").(*Application))
+}
+
+// PostApplicationHandler updates the details for the application.
+func PostApplicationHandler(ctx *fiber.Ctx) error {
+	application := ctx.Locals("application").(*Application)
+
+	var requestBody PostApplicationRequestBody
+
+	if err := ctx.BodyParser(&requestBody); err != nil {
+		return ctx.Status(http.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: %s", err))
+	}
+
+	if err := db.UpdateApplicationByID(application.ID, bson.M{
+		"$set": bson.M{
+			"name":             requestBody.Name,
+			"shortDescription": requestBody.ShortDescription,
+		},
+	}); err != nil {
+		return err
+	}
+
+	return ctx.SendStatus(http.StatusOK)
+}
+
+// DeleteApplicationHandler permanently deletes the application.
+func DeleteApplicationHandler(ctx *fiber.Ctx) error {
+	application := ctx.Locals("application").(*Application)
+
+	if err := db.DeleteApplicationByID(application.ID); err != nil {
+		return err
+	}
+
+	return ctx.SendStatus(http.StatusOK)
+}
+
+// GetApplicationTokensHandler returns the tokens listed under the application.
+func GetApplicationTokensHandler(ctx *fiber.Ctx) error {
+	sortBy := ctx.Query("sort", "name")
+	sortDirection := ctx.Query("direction", "ascending")
+
+	application := ctx.Locals("application").(*Application)
+
+	tokens, err := db.GetTokensByApplication(application.ID, sortBy, sortDirection)
 
 	if err != nil {
 		return err
 	}
 
-	if application == nil {
-		return ctx.Status(http.StatusNotFound).SendString("No application found by that ID")
+	return ctx.JSON(tokens)
+}
+
+// PostApplicationTokensHandler creates a new token for the application using the body data provided.
+func PostApplicationTokensHandler(ctx *fiber.Ctx) error {
+	app := ctx.Locals("application").(*Application)
+
+	var requestBody PostApplicationTokensRequestBody
+
+	if err := ctx.BodyParser(&requestBody); err != nil {
+		return ctx.Status(http.StatusBadRequest).SendString(fmt.Sprintf("Invalid request body: %s", err))
 	}
 
-	return ctx.JSON(application)
+	tokenDocument := Token{
+		ID:            RandomHexString(12),
+		Name:          requestBody.Name,
+		Token:         RandomHexString(16),
+		TotalRequests: 0,
+		Application:   app.ID,
+		CreatedAt:     time.Now().UTC(),
+		LastUsedAt:    time.Now().UTC(),
+	}
+
+	if err := db.InsertToken(tokenDocument); err != nil {
+		return err
+	}
+
+	return ctx.Status(http.StatusCreated).JSON(tokenDocument)
+}
+
+// DeleteApplicationTokenHandler deletes the specified application token.
+func DeleteApplicationTokenHandler(ctx *fiber.Ctx) error {
+	token, err := db.GetTokenByID(ctx.Params("tokenID"))
+
+	if err != nil {
+		return err
+	}
+
+	if token == nil {
+		return ctx.Status(http.StatusNotFound).SendString("No token was found by that ID")
+	}
+
+	if err = db.DeleteTokenByID(token.ID); err != nil {
+		return err
+	}
+
+	return ctx.SendStatus(http.StatusOK)
 }

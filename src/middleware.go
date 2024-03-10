@@ -92,6 +92,24 @@ func GetUserMiddleware(param string) fiber.Handler {
 	}
 }
 
+func GetApplicationMiddleware(param string) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		app, err := db.GetApplicationByID(ctx.Params(param))
+
+		if err != nil {
+			return err
+		}
+
+		if app == nil {
+			return ctx.Status(http.StatusNotFound).SendString("No application found by that ID")
+		}
+
+		ctx.Locals("application", app)
+
+		return ctx.Next()
+	}
+}
+
 func RequireAuthMiddleware() fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		authUser, ok := ctx.Locals("authUser").(*User)
@@ -119,6 +137,28 @@ func UserAuthMiddleware() fiber.Handler {
 		}
 
 		if authUser.ID == user.ID {
+			return ctx.Next()
+		}
+
+		return ctx.Status(http.StatusForbidden).SendString("You must be authorized to access this endpoint")
+	}
+}
+
+func ApplicationAuthMiddleware() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		app, ok := ctx.Locals("application").(*Application)
+
+		if !ok || app == nil {
+			return ctx.Status(http.StatusNotFound).SendString("Application not found")
+		}
+
+		authUser, ok := ctx.Locals("authUser").(*User)
+
+		if !ok || authUser == nil {
+			return ctx.Status(http.StatusUnauthorized).SendString("You must be authorized to access this endpoint")
+		}
+
+		if authUser.ID == app.User {
 			return ctx.Next()
 		}
 

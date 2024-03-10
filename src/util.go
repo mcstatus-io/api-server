@@ -41,3 +41,11 @@ func HashPassword(password string) string {
 
 	return hex.EncodeToString(hash[:])
 }
+
+func GetSortDirectionValue(value string) int {
+	if value == "ascending" {
+		return 1
+	}
+
+	return -1
+}
