@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -37,6 +38,11 @@ type PostApplicationTokensRequestBody struct {
 	Name string `json:"name" validate:"min=2,max=64,required"`
 }
 
+type UsageLogResponseBody struct {
+	Timestamp    string `json:"timestamp"`
+	RequestCount int64  `json:"requestCount"`
+}
+
 func init() {
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
@@ -69,6 +75,7 @@ func init() {
 	app.Get("/applications/:applicationID/tokens", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), GetApplicationTokensHandler)
 	app.Post("/applications/:applicationID/tokens", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), PostApplicationTokensHandler)
 	app.Delete("/applications/:applicationID/tokens/:tokenID", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), DeleteApplicationTokenHandler)
+	app.Get("/applications/:applicationID/usage", AuthenticateMiddleware(), RequireAuthMiddleware(), GetApplicationMiddleware("applicationID"), ApplicationAuthMiddleware(), GetApplicationUsageHandler)
 }
 
 // PingHandler responds with a 200 OK status for simple health checks.
@@ -448,4 +455,78 @@ func DeleteApplicationTokenHandler(ctx *fiber.Ctx) error {
 	}
 
 	return ctx.SendStatus(http.StatusOK)
+}
+
+// GetApplicationUsageHandler returns the usage data for the application.
+func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
+	var (
+		fromQuery = ctx.Query("from", strconv.FormatInt(time.Now().Add(-time.Hour*24).UnixMilli(), 10))
+		toQuery   = ctx.Query("to", strconv.FormatInt(time.Now().UnixMilli(), 10))
+		stepQuery = ctx.Query("step", "12")
+
+		fromDate     time.Time
+		toDate       time.Time
+		stepCount    int
+		stepDuration time.Duration
+	)
+
+	{
+		value, err := strconv.ParseInt(fromQuery, 10, 64)
+
+		if err != nil {
+			return err
+		}
+
+		fromDate = time.UnixMilli(value)
+	}
+
+	{
+		value, err := strconv.ParseInt(toQuery, 10, 64)
+
+		if err != nil {
+			return err
+		}
+
+		toDate = time.UnixMilli(value)
+	}
+
+	{
+		value, err := strconv.ParseInt(stepQuery, 10, 64)
+
+		if err != nil {
+			return err
+		}
+
+		stepCount = int(value)
+		stepDuration = time.Duration(float64(toDate.Sub(fromDate).Milliseconds())/float64(stepCount)) * time.Millisecond
+	}
+
+	application := ctx.Locals("application").(*Application)
+
+	logs, err := db.GetRequestLogsByApplication(application.ID, fromDate, toDate)
+
+	if err != nil {
+		return err
+	}
+
+	result := make([]*UsageLogResponseBody, 0)
+
+	for i := 0; i < stepCount; i++ {
+		var requestCount int64 = 0
+
+		for _, v := range logs {
+			if v.Timestamp.Compare(fromDate.Add(stepDuration*time.Duration(i))) < 0 || v.Timestamp.Compare(fromDate.Add(stepDuration*time.Duration(i+1))) > 0 {
+				continue
+			}
+
+			requestCount += v.RequestCount
+		}
+
+		result = append(result, &UsageLogResponseBody{
+			Timestamp:    fromDate.Add(stepDuration * time.Duration(i)).Format(time.RFC3339),
+			RequestCount: requestCount,
+		})
+	}
+
+	return ctx.JSON(result)
 }
