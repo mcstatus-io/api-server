@@ -13,6 +13,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+var (
+	UsageChartInterval time.Duration = time.Hour
+)
+
 type PostLoginRequestBody struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -346,7 +350,7 @@ func PostApplicationsHandler(ctx *fiber.Ctx) error {
 		ShortDescription: requestBody.ShortDescription,
 		User:             authUser.ID,
 		Token:            RandomHexString(16),
-		TotalRequests:    0,
+		RequestCount:     0,
 		CreatedAt:        time.Now().UTC(),
 	}
 
@@ -422,13 +426,13 @@ func PostApplicationTokensHandler(ctx *fiber.Ctx) error {
 	}
 
 	tokenDocument := Token{
-		ID:            RandomHexString(12),
-		Name:          requestBody.Name,
-		Token:         RandomHexString(16),
-		TotalRequests: 0,
-		Application:   app.ID,
-		CreatedAt:     time.Now().UTC(),
-		LastUsedAt:    time.Now().UTC(),
+		ID:           RandomHexString(12),
+		Name:         requestBody.Name,
+		Token:        RandomHexString(16),
+		RequestCount: 0,
+		Application:  app.ID,
+		CreatedAt:    time.Now().UTC(),
+		LastUsedAt:   time.Now().UTC(),
 	}
 
 	if err := db.InsertToken(tokenDocument); err != nil {
@@ -462,12 +466,9 @@ func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
 	var (
 		fromQuery = ctx.Query("from", strconv.FormatInt(time.Now().Add(-time.Hour*24).UnixMilli(), 10))
 		toQuery   = ctx.Query("to", strconv.FormatInt(time.Now().UnixMilli(), 10))
-		stepQuery = ctx.Query("step", "12")
 
-		fromDate     time.Time
-		toDate       time.Time
-		stepCount    int
-		stepDuration time.Duration
+		fromDate time.Time
+		toDate   time.Time
 	)
 
 	{
@@ -477,7 +478,7 @@ func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
 			return err
 		}
 
-		fromDate = time.UnixMilli(value)
+		fromDate = time.UnixMilli(value).Truncate(UsageChartInterval)
 	}
 
 	{
@@ -490,17 +491,6 @@ func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
 		toDate = time.UnixMilli(value)
 	}
 
-	{
-		value, err := strconv.ParseInt(stepQuery, 10, 64)
-
-		if err != nil {
-			return err
-		}
-
-		stepCount = int(value)
-		stepDuration = time.Duration(float64(toDate.Sub(fromDate).Milliseconds())/float64(stepCount)) * time.Millisecond
-	}
-
 	application := ctx.Locals("application").(*Application)
 
 	logs, err := db.GetRequestLogsByApplication(application.ID, fromDate, toDate)
@@ -509,13 +499,16 @@ func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
 		return err
 	}
 
-	result := make([]*UsageLogResponseBody, 0)
+	var (
+		result      = make([]*UsageLogResponseBody, 0)
+		currentDate = fromDate
+	)
 
-	for i := 0; i < stepCount; i++ {
+	for currentDate.Compare(toDate) < 0 {
 		var requestCount int64 = 0
 
 		for _, v := range logs {
-			if v.Timestamp.Compare(fromDate.Add(stepDuration*time.Duration(i))) < 0 || v.Timestamp.Compare(fromDate.Add(stepDuration*time.Duration(i+1))) > 0 {
+			if v.Timestamp.Compare(currentDate.Add(UsageChartInterval)) >= 0 || v.Timestamp.Compare(currentDate) < 0 {
 				continue
 			}
 
@@ -523,9 +516,11 @@ func GetApplicationUsageHandler(ctx *fiber.Ctx) error {
 		}
 
 		result = append(result, &UsageLogResponseBody{
-			Timestamp:    fromDate.Add(stepDuration * time.Duration(i)).Format(time.RFC3339),
+			Timestamp:    currentDate.Format(time.RFC3339),
 			RequestCount: requestCount,
 		})
+
+		currentDate = currentDate.Add(UsageChartInterval)
 	}
 
 	return ctx.JSON(result)

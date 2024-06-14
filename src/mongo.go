@@ -45,23 +45,24 @@ type Application struct {
 	ShortDescription string    `bson:"shortDescription" json:"shortDescription"`
 	User             string    `bson:"user" json:"user"`
 	Token            string    `bson:"token" json:"token"`
-	TotalRequests    uint64    `bson:"totalRequests" json:"totalRequests"`
+	RequestCount     uint64    `bson:"requestCount" json:"requestCount"`
 	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
 }
 
 type Token struct {
-	ID            string    `bson:"_id" json:"id"`
-	Name          string    `bson:"name" json:"name"`
-	Token         string    `bson:"token" json:"token"`
-	TotalRequests uint64    `bson:"totalRequests" json:"totalRequests"`
-	Application   string    `bson:"application" json:"application"`
-	CreatedAt     time.Time `bson:"createdAt" json:"createdAt"`
-	LastUsedAt    time.Time `bson:"lastUsedAt" json:"lastUsedAt"`
+	ID           string    `bson:"_id" json:"id"`
+	Name         string    `bson:"name" json:"name"`
+	Token        string    `bson:"token" json:"token"`
+	RequestCount uint64    `bson:"requestCount" json:"requestCount"`
+	Application  string    `bson:"application" json:"application"`
+	CreatedAt    time.Time `bson:"createdAt" json:"createdAt"`
+	LastUsedAt   time.Time `bson:"lastUsedAt" json:"lastUsedAt"`
 }
 
 type RequestLog struct {
 	ID           string    `bson:"_id" json:"_id"`
 	Application  string    `bson:"application" json:"application"`
+	Token        string    `bson:"token" json:"token"`
 	Timestamp    time.Time `bson:"timestamp" json:"timestamp"`
 	RequestCount int64     `bson:"requestCount" json:"requestCount"`
 }
