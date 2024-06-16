@@ -50,13 +50,13 @@ type Application struct {
 }
 
 type Token struct {
-	ID           string    `bson:"_id" json:"id"`
-	Name         string    `bson:"name" json:"name"`
-	Token        string    `bson:"token" json:"token"`
-	RequestCount uint64    `bson:"requestCount" json:"requestCount"`
-	Application  string    `bson:"application" json:"application"`
-	CreatedAt    time.Time `bson:"createdAt" json:"createdAt"`
-	LastUsedAt   time.Time `bson:"lastUsedAt" json:"lastUsedAt"`
+	ID           string     `bson:"_id" json:"id"`
+	Name         string     `bson:"name" json:"name"`
+	Token        string     `bson:"token" json:"token"`
+	RequestCount uint64     `bson:"requestCount" json:"requestCount"`
+	Application  string     `bson:"application" json:"application"`
+	CreatedAt    time.Time  `bson:"createdAt" json:"createdAt"`
+	LastUsedAt   *time.Time `bson:"lastUsedAt" json:"lastUsedAt"`
 }
 
 type RequestLog struct {

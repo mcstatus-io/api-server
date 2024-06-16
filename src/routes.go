@@ -432,7 +432,7 @@ func PostApplicationTokensHandler(ctx *fiber.Ctx) error {
 		RequestCount: 0,
 		Application:  app.ID,
 		CreatedAt:    time.Now().UTC(),
-		LastUsedAt:   time.Now().UTC(),
+		LastUsedAt:   nil,
 	}
 
 	if err := db.InsertToken(tokenDocument); err != nil {
