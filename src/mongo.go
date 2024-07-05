@@ -84,6 +84,10 @@ func (c *MongoDB) Connect(uri string) error {
 		return err
 	}
 
+	if err := client.Ping(ctx, nil); err != nil {
+		return err
+	}
+
 	c.Client = client
 	c.Database = client.Database(strings.TrimPrefix(parsedURI.Path, "/"))
 
